@@ -11,6 +11,9 @@ import { Badge } from "@/components/ui/badge"
 import { Coffee, Cake, IceCream, ShoppingCart, DollarSign, TrendingUp, Trash2 } from 'lucide-react'
 import Image from 'next/image'
 import { listProducts } from '@/services/ProductService'
+import { registerOrder } from '@/services/OrderService'
+import { getProductTrend } from '@/services/PurchaseService'
+import { getDailySales, registerSale } from '@/services/SaleService'
 
 type Product = {
     id: number
@@ -22,25 +25,39 @@ type Product = {
 
 type CartItem = Product & { quantity: number }
 
-// const products: Product[] = [
-//     { id: 1, name: 'Espresso', price: 2.5, category: 'coffee', image: 'https://i.pinimg.com/564x/fe/eb/7d/feeb7da08ad6833143122b12bb31dd99.jpg' },
-//     { id: 2, name: 'Latte', price: 3.5, category: 'coffee', image: 'https://i.pinimg.com/564x/f9/68/d6/f968d6cbefadd0aa8ed53f321be9491c.jpg' },
-//     { id: 3, name: 'Cappuccino', price: 3.5, category: 'coffee', image: 'https://i.pinimg.com/564x/6a/86/c3/6a86c387495a30851e5843a582c7b6f2.jpg' },
-//     { id: 4, name: 'Croissant', price: 2.0, category: 'pastry', image: 'https://i.pinimg.com/564x/fe/44/1d/fe441dc93ec730d2d92cfe6c0cb66866.jpg' },
-//     { id: 5, name: 'Chocolate Cake', price: 4.0, category: 'pastry', image: 'https://i.pinimg.com/564x/b1/ff/76/b1ff76226cb167de0152fbdcc8d8e080.jpg' },
-//     { id: 6, name: 'Ice Cream', price: 3.0, category: 'dessert', image: 'https://i.pinimg.com/564x/b1/b0/c8/b1b0c89d4291bfb089d415c4e7c59931.jpg' },
-// ]
-
 
 export default function CoffeeShopPOS() {
+    const [bestSeller, setBestSeller] = useState<string>('Cargando...');
+
     const [products, setProducts] = useState<Product[]>([]);
     const [cart, setCart] = useState<CartItem[]>([])
     const [dailySales, setDailySales] = useState(0)
     const [activeCategory, setActiveCategory] = useState<'all' | 'coffee' | 'pastry' | 'dessert'>('all')
 
     useEffect(() => {
-        listProducts().then(response => setProducts(response.data))
-    }, [])
+        listProducts().then(response => setProducts(response.data));
+
+        // Obtener el producto más vendido
+        getProductTrend()
+            .then(productTrends => {
+                if (productTrends.length > 0) {
+                    // Tomar el primer producto de la lista como el más vendido
+                    const mostSoldProduct = productTrends[0];
+                    setBestSeller(mostSoldProduct.name);  // Asignar el nombre del producto más vendido
+                } else {
+                    setBestSeller('No hay productos vendidos');
+                }
+            })
+            .catch(() => setBestSeller('Error al cargar'));
+
+        // Obtener las ventas diarias al cargar
+        getDailySales()
+            .then(sales => setDailySales(sales))
+            .catch(() => setDailySales(0));
+    }, []);
+
+
+
 
     const addToCart = (product: Product) => {
         setCart(prevCart => {
@@ -62,12 +79,37 @@ export default function CoffeeShopPOS() {
         return cart.reduce((total, item) => total + item.price * item.quantity, 0)
     }
 
-    const handleCheckout = () => {
-        const total = getTotalPrice()
-        setDailySales(prevSales => prevSales + total)
-        setCart([])
-        alert(`Venta completada. Total: $${total.toFixed(2)}`)
-    }
+    const handleCheckout = async () => {
+        try {
+            // Asegurarse de que cart tiene los productos correctos
+            if (cart.length === 0) {
+                alert('El carrito está vacío.');
+                return;
+            }
+    
+            const orders = cart.map(item => ({
+                quantity: item.quantity,
+                date: new Date()
+            }));
+    
+            // Espera a que todas las órdenes se registren correctamente
+            const promises = orders.map(order => registerOrder(order));  
+            await Promise.all(promises);
+    
+            // Registrar la venta diaria
+            await registerSale();
+    
+            // Actualizar las ventas y limpiar el carrito
+            setDailySales(prevSales => prevSales + getTotalPrice());
+            setCart([]); // Limpia el carrito después de completar la compra
+            alert('Compra completada con éxito');
+        } catch (error) {
+            // Capturar el error detallado
+            console.error('Error durante la compra:', error);
+            alert('Hubo un error al completar la compra. Por favor, inténtalo de nuevo.');
+        }
+    };
+    
 
     const filteredProducts = activeCategory === 'all' ? products : products.filter(p => p.category === activeCategory)
 
@@ -219,10 +261,11 @@ export default function CoffeeShopPOS() {
                                     <CardContent>
                                         <p className="text-2xl font-semibold flex items-center justify-center h-24">
                                             <TrendingUp className="mr-2 h-6 w-6" />
-                                            Latte
+                                            {bestSeller}
                                         </p>
                                     </CardContent>
                                 </Card>
+
                             </div>
                         </CardContent>
                     </Card>
